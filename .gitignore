@@ -20,3 +20,6 @@ dist/
 # project outputs
 output/
 EOF
+
+#test directories
+test-obj/

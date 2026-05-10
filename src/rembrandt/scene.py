@@ -156,3 +156,67 @@ class Scene:
 
         self.lights.append(light_obj)
         return light_obj
+    
+    def render(self,
+               output_path: str | Path,
+               *,
+               resolution: tuple[int, int] = (256,256),
+               engine: Literal["EEVEE", "CYCLES"] = "EEVEE",
+               samples: int = 32,
+               ) -> Path:
+        """Renders the current scene to a PNG file.
+        
+        Args:
+            output_path: Where to write rendered PNG.
+            resolution: (width, height) in pixels.
+            engine: 
+                - EEVEE for fast rasterization (good for high-volume data)
+                - CYCLES for path-traced realism (slower)
+            samples: Render samples. For EEVEE this is TAA samples;
+                     for CYCLES, path samples per pixel.
+                     Higher = less noise, slower.
+
+            Returns: 
+                The output path as a Path object.
+            
+            Raises:
+                RuntimeError: If no camera has been added to the scene.
+        """
+        if self.camera is None:
+            raise RuntimeError("No camera in the scene. Call add_camera() before render().")
+        
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        # Map friendly names to bpy's internal engine identifiers.
+        # Note: Blender 5.x renamed BLENDER_EEVEE_NEXT back to BLENDER_EEVEE.
+        # We're pinned to bpy 4.5 LTS, so NEXT is correct.
+        engine_id = {
+            "EEVEE": "BLENDER_EEVEE_NEXT",
+            "CYCLES": "CYCLES",
+        }[engine]
+
+        bpy_scene = bpy.context.scene
+
+
+        # `bpy_scene.render` here is bpy's render-settings struct —
+        # not a method on our Scene class. Naming overlap, no conflict.
+        bpy_scene.render.engine = engine_id
+        bpy_scene.render.resolution_x = resolution[0]
+        bpy_scene.render.resolution_y = resolution[1]
+        bpy_scene.render.resolution_percentage = 100
+        bpy_scene.render.image_settings.file_format = "PNG"
+        bpy_scene.render.image_settings.color_mode = "RGB"
+
+        if engine == "EEVEE":
+            bpy_scene.eevee.taa_render_samples = samples
+        else:
+            bpy_scene.cycles.samples = samples
+
+        # Two-step render: render to internal buffer, then explicitly save.
+        # Avoids Blender's quirks around appending frame numbers and
+        # extra extensions to render.filepath.
+        bpy.ops.render.render()
+        bpy.data.images["Render Result"].save_render(filepath=str(output))
+
+        return output
