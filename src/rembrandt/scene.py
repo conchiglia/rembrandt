@@ -98,7 +98,7 @@ class Scene:
         # to_track_quat('-Z', 'Y') gives the rotation that aligns the
         # camera's view direction with `direction`.
         direction = Vector(look_at) - Vector(location)
-        camera_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+        camera_obj.rotation_euler = direction.to_track_quat("-Z", "X").to_euler()
 
         bpy.context.scene.camera = camera_obj
         self.camera = camera_obj
@@ -220,3 +220,31 @@ class Scene:
         bpy.data.images["Render Result"].save_render(filepath=str(output))
 
         return output
+    
+    def center_target(self) -> None:
+        """Translate the target so its bounding-box center is at (0, 0, 0).
+
+        .obj files don't guarantee where the geometry sits relative to
+        the object origin — exporters often put the origin at floor
+        level, one corner, or somewhere arbitrary. This normalizes the
+        target so camera and light placement relative to the world
+        origin actually frames the model.
+
+        Raises:
+            RuntimeError: If no target has been loaded.
+        """
+        if self.target is None:
+            raise RuntimeError("No target loaded. Call load_object() first.")
+
+        # bound_box is 8 corner points in the target's *local* space.
+        # We multiply each by matrix_world to get world-space corners,
+        # then average them to find the world-space bbox center.
+        world_corners = [
+            self.target.matrix_world @ Vector(corner)
+            for corner in self.target.bound_box
+        ]
+        center = sum(world_corners, Vector()) / 8
+
+        # Translating the origin by -center shifts the whole object
+        # so its bbox center lands at (0, 0, 0).
+        self.target.location -= center
