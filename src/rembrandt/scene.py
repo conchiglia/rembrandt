@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from math import sin
 from pathlib import Path
 from typing import Literal
 
 import bpy
-from mathutils import Vector # type: ignore
+from mathutils import Vector  # type: ignore
 
 from rembrandt.errors import ModelFileNotFoundError
-
 
 
 class Scene:
@@ -76,6 +76,8 @@ class Scene:
         location: tuple[float, float, float] = (5.0, 5.0, 5.0),
         look_at: tuple[float, float, float] = (0.0, 0.0, 0.0),
         focal_length: float = 50.0,
+        fit_target: bool = True,
+        fit_margin: float = 1.2,
     ) -> bpy.types.Object:
         """Create a camera, point it at a target, and set it active.
 
@@ -83,6 +85,9 @@ class Scene:
             location: Camera position (x, y, z) in world coordinates.
             look_at: World-space point the camera aims at.
             focal_length: Focal length in mm. 50mm is "standard" / human-eye.
+            fit_target: If True and a target is loaded, move the camera back
+                along the requested view direction until the target fits.
+            fit_margin: Extra framing margin around the target.
 
         Returns:
             The created camera object.
@@ -94,25 +99,51 @@ class Scene:
         bpy.context.collection.objects.link(camera_obj)
         camera_obj.location = location
 
+        look_at_vec = Vector(look_at)
+
+        if fit_target and self.target is not None:
+            if fit_margin <= 0:
+                raise ValueError("fit_margin must be greater than 0.")
+
+            bpy.context.view_layer.update()
+            corners = [
+                self.target.matrix_world @ Vector(corner)
+                for corner in self.target.bound_box
+            ]
+            radius = max((corner - look_at_vec).length for corner in corners)
+            current_direction = look_at_vec - Vector(location)
+
+            if current_direction.length == 0:
+                raise ValueError("Camera location and look_at cannot be the same point.")
+
+            fov = min(camera_data.angle_x, camera_data.angle_y)
+            fit_distance = (radius * fit_margin) / sin(fov / 2)
+            distance = max(current_direction.length, fit_distance)
+            camera_obj.location = look_at_vec - current_direction.normalized() * distance
+
         # Blender cameras look down their local -Z axis with +Y as up.
         # to_track_quat('-Z', 'Y') gives the rotation that aligns the
         # camera's view direction with `direction`.
-        direction = Vector(look_at) - Vector(location)
-        camera_obj.rotation_euler = direction.to_track_quat("-Z", "X").to_euler()
+        direction = look_at_vec - Vector(camera_obj.location)
+        if direction.length == 0:
+            raise ValueError("Camera location and look_at cannot be the same point.")
+        camera_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
         bpy.context.scene.camera = camera_obj
         self.camera = camera_obj
+        bpy.context.view_layer.update()
         return camera_obj
-    
-    def add_light(self,
-                  *,
-                  light_type: Literal["POINT", "SUN", "AREA"] = "POINT",
-                  location: tuple[float, float, float] = (5.0, 5.0, 5.0),
-                  look_at: tuple[float, float, float] = (1.0, 1.0, 1.0),
-                  energy: float | None = None,
-                  color: tuple[float, float, float] = (1.0, 1.0, 1.0),
-                  size: float = 1.0,
-                  ) -> bpy.types.Object:
+
+    def add_light(
+        self,
+        *,
+        light_type: Literal["POINT", "SUN", "AREA"] = "POINT",
+        location: tuple[float, float, float] = (5.0, 5.0, 5.0),
+        look_at: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        energy: float | None = None,
+        color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        size: float = 1.0,
+    ) -> bpy.types.Object:
         """
         Args:
             light_type: One of "POINT" (omnidirectional), "SUN" (parallel
@@ -148,43 +179,45 @@ class Scene:
         bpy.context.collection.objects.link(light_obj)
         light_obj.location = location
 
-        #POINT is omnidirectional - rotation has no effect.
-        #SUN and AREA emit along their local -Z axis (same convention as the camera), so the same _to_track_quat trick aims them.
+        # POINT is omnidirectional - rotation has no effect.
+        # SUN and AREA emit along local -Z, so the camera aiming logic applies.
         if light_type != "POINT":
             direction = Vector(look_at) - Vector(location)
             light_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
         self.lights.append(light_obj)
+        bpy.context.view_layer.update()
         return light_obj
-    
-    def render(self,
-               output_path: str | Path,
-               *,
-               resolution: tuple[int, int] = (256,256),
-               engine: Literal["EEVEE", "CYCLES"] = "EEVEE",
-               samples: int = 32,
-               ) -> Path:
+
+    def render(
+        self,
+        output_path: str | Path,
+        *,
+        resolution: tuple[int, int] = (256, 256),
+        engine: Literal["EEVEE", "CYCLES"] = "EEVEE",
+        samples: int = 32,
+    ) -> Path:
         """Renders the current scene to a PNG file.
-        
+
         Args:
             output_path: Where to write rendered PNG.
             resolution: (width, height) in pixels.
-            engine: 
+            engine:
                 - EEVEE for fast rasterization (good for high-volume data)
                 - CYCLES for path-traced realism (slower)
             samples: Render samples. For EEVEE this is TAA samples;
                      for CYCLES, path samples per pixel.
                      Higher = less noise, slower.
 
-            Returns: 
+            Returns:
                 The output path as a Path object.
-            
+
             Raises:
                 RuntimeError: If no camera has been added to the scene.
         """
         if self.camera is None:
             raise RuntimeError("No camera in the scene. Call add_camera() before render().")
-        
+
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -197,7 +230,7 @@ class Scene:
         }[engine]
 
         bpy_scene = bpy.context.scene
-
+        bpy_scene.camera = self.camera
 
         # `bpy_scene.render` here is bpy's render-settings struct —
         # not a method on our Scene class. Naming overlap, no conflict.
@@ -220,7 +253,7 @@ class Scene:
         bpy.data.images["Render Result"].save_render(filepath=str(output))
 
         return output
-    
+
     def center_target(self) -> None:
         """Translate the target so its bounding-box center is at (0, 0, 0).
 
@@ -248,3 +281,4 @@ class Scene:
         # Translating the origin by -center shifts the whole object
         # so its bbox center lands at (0, 0, 0).
         self.target.location -= center
+        bpy.context.view_layer.update()
