@@ -49,5 +49,3 @@ Most modules under `src/rembrandt/` don't exist yet — the tree shows the plann
 - `README.md`, `LICENSE` (MIT), `.gitignore` in place.
 
 **Gotchas worth knowing.** bpy is strictly tied to Python 3.11 — bumping Python means bumping bpy and vice versa. The bpy wheel is roughly 700MB, so CI installs need aggressive caching. The `src/` layout means you must `pip install -e .` before `import rembrandt` works; running scripts from the project root won't find the package otherwise. mypy is in strict mode from day one with `ignore_missing_imports = true` because bpy ships no type stubs.
-
-**Next step (Phase 1, walking skeleton).** Write the minimum code to load a `.obj` file, place a camera at a fixed pose, set up basic lighting, render a single PNG against a plain background, and output a valid YOLO label file. The bounding box has to match what the renderer actually produced — once that math is right, every subsequent phase is mostly orchestration on top.
