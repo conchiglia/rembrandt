@@ -97,6 +97,42 @@ class Scene:
 
         camera_obj = bpy.data.objects.new("Camera", camera_data)
         bpy.context.collection.objects.link(camera_obj)
+        self.camera = camera_obj
+        bpy.context.scene.camera = camera_obj
+
+        return self.move_camera(
+            location=location,
+            look_at=look_at,
+            fit_target=fit_target,
+            fit_margin=fit_margin,
+        )
+
+    def move_camera(
+        self,
+        location: tuple[float, float, float],
+        look_at: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        fit_target: bool = True,
+        fit_margin: float = 1.2,
+    ) -> bpy.types.Object:
+        """Move the existing camera, point it at a target, and keep it active.
+
+        Args:
+            location: New camera position (x, y, z) in world coordinates.
+            look_at: World-space point the camera aims at.
+            fit_target: If True and a target is loaded, move the camera back
+                along the requested view direction until the target fits.
+            fit_margin: Extra framing margin around the target.
+
+        Returns:
+            The existing camera object after repositioning.
+
+        Raises:
+            RuntimeError: If no camera has been added to the scene.
+        """
+        if self.camera is None:
+            raise RuntimeError("No camera in the scene. Call add_camera() before move_camera().")
+
+        camera_obj = self.camera
         camera_obj.location = location
 
         look_at_vec = Vector(look_at)
@@ -116,7 +152,7 @@ class Scene:
             if current_direction.length == 0:
                 raise ValueError("Camera location and look_at cannot be the same point.")
 
-            fov = min(camera_data.angle_x, camera_data.angle_y)
+            fov = min(camera_obj.data.angle_x, camera_obj.data.angle_y)
             fit_distance = (radius * fit_margin) / sin(fov / 2)
             distance = max(current_direction.length, fit_distance)
             camera_obj.location = look_at_vec - current_direction.normalized() * distance
@@ -130,7 +166,6 @@ class Scene:
         camera_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
         bpy.context.scene.camera = camera_obj
-        self.camera = camera_obj
         bpy.context.view_layer.update()
         return camera_obj
 

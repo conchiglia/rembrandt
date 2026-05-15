@@ -3,11 +3,11 @@
 The samplers in this module are pure Python math helpers. They do not import
 Blender, so they can be tested quickly without the bpy runtime.
 
-Scene.add_camera defaults to fit_target=True. If a sampled camera distance is
-too close to frame the loaded object, Scene.add_camera moves the camera back to
-the fit distance. This keeps the object visible, but it means small sampled
-distances may be overridden. Pass fit_target=False to Scene.add_camera if exact
-sampled distances are required.
+Scene.add_camera and Scene.move_camera default to fit_target=True. If a sampled
+camera distance is too close to frame the loaded object, the scene moves the
+camera back to the fit distance. This keeps the object visible, but it means
+small sampled distances may be overridden. Pass fit_target=False to either
+method if exact sampled distances are required.
 """
 
 from __future__ import annotations
