@@ -137,25 +137,13 @@ class Scene:
 
         look_at_vec = Vector(look_at)
 
-        if fit_target and self.target is not None:
-            if fit_margin <= 0:
-                raise ValueError("fit_margin must be greater than 0.")
-
-            bpy.context.view_layer.update()
-            corners = [
-                self.target.matrix_world @ Vector(corner)
-                for corner in self.target.bound_box
-            ]
-            radius = max((corner - look_at_vec).length for corner in corners)
-            current_direction = look_at_vec - Vector(location)
-
-            if current_direction.length == 0:
-                raise ValueError("Camera location and look_at cannot be the same point.")
-
-            fov = min(camera_obj.data.angle_x, camera_obj.data.angle_y)
-            fit_distance = (radius * fit_margin) / sin(fov / 2)
-            distance = max(current_direction.length, fit_distance)
-            camera_obj.location = look_at_vec - current_direction.normalized() * distance
+        if fit_target:
+            self._fit_camera_to_target(
+                camera_obj=camera_obj,
+                requested_location=location,
+                look_at=look_at_vec,
+                fit_margin=fit_margin,
+            )
 
         # Blender cameras look down their local -Z axis with +Y as up.
         # to_track_quat('-Z', 'Y') gives the rotation that aligns the
@@ -168,6 +156,56 @@ class Scene:
         bpy.context.scene.camera = camera_obj
         bpy.context.view_layer.update()
         return camera_obj
+
+    def _fit_camera_to_target(
+        self,
+        *,
+        camera_obj: bpy.types.Object,
+        requested_location: tuple[float, float, float],
+        look_at: Vector,
+        fit_margin: float,
+    ) -> None:
+        """Move the camera back along its view direction until the target fits."""
+        if self.target is None:
+            return
+        if fit_margin <= 0:
+            raise ValueError("fit_margin must be greater than 0.")
+
+        bpy.context.view_layer.update()
+
+        # bound_box stores the target's 8 corners in local object space.
+        # Multiplying by matrix_world gives the current world-space corners,
+        # including any translation done by center_target().
+        corners = [
+            self.target.matrix_world @ Vector(corner)
+            for corner in self.target.bound_box
+        ]
+
+        # Treat the target as a sphere centered on the point the camera
+        # looks at. The farthest bbox corner defines the sphere radius.
+        # This is conservative for long or rotated objects, but stable:
+        # if the sphere fits in the camera frustum, the whole bbox fits too.
+        radius = max((corner - look_at).length for corner in corners)
+
+        # The sampled camera pose defines the view direction. Fitting should
+        # preserve that direction, so we only change distance along the same
+        # ray instead of sliding sideways or changing the look_at point.
+        requested_direction = look_at - Vector(requested_location)
+        if requested_direction.length == 0:
+            raise ValueError("Camera location and look_at cannot be the same point.")
+
+        # Use the smaller horizontal/vertical field of view because it is the
+        # limiting axis for square and non-square renders. For a sphere of
+        # radius r to fit inside a cone with half-angle theta, the camera must
+        # be at least r / sin(theta) away. fit_margin scales r first to leave
+        # extra space around the target in the final image.
+        fov = min(camera_obj.data.angle_x, camera_obj.data.angle_y)
+        fit_distance = (radius * fit_margin) / sin(fov / 2)
+
+        # Keep cameras that are already far enough away at their sampled
+        # distance; only move too-close cameras back along the same ray.
+        distance = max(requested_direction.length, fit_distance)
+        camera_obj.location = look_at - requested_direction.normalized() * distance
 
     def add_light(
         self,
