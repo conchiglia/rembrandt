@@ -1,10 +1,13 @@
+```
 rembrandt (in honour of Rembrandt Harmenszoon van Rijn)
-synthetic computer vision dataset creation made easy.
+(early stage development)
 
-generate training data for object detection from single `.obj` file:
+---
+
+generate training data for object detection from single `.obj` 3d model:
 - randomized camera angles, lighting, backgrounds and 2D augmentations
 - output directly in YOLO format with a ready-to-run training script
 
-early stage development. not yet usable.
 
-copyright @conchiglia 2026
+made by @mantczak04
+```
